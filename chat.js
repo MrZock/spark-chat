@@ -7,7 +7,7 @@
 // Gruppe: Inhalt mit einem Zufallsschlüssel verschlüsselt, der für jedes Mitglied einzeln verpackt wird.
 'use strict';
 (() => {
-const VERSION = 'Alpha 1.1.0';
+const VERSION = 'Alpha 1.1.1';
 const $ = id => document.getElementById(id);
 const SITE = 'https://mrzock.github.io/spark/';
 const LINKS = { terms: SITE + 'nutzungsbedingungen.html', privacy: SITE + 'datenschutz.html#chat', contact: SITE + 'datenschutz.html#kontakt' };
@@ -111,7 +111,7 @@ function connect() {
     const s = ws = new WebSocket(SERVER);
     let opened = false;
     const slow = setTimeout(() => { if (!opened) status('Server wacht auf … das kann beim ersten Mal bis zu einer Minute dauern.'); }, 3500);
-    s.onopen = () => { opened = true; clearTimeout(slow); retryN = 0; res(); };
+    s.onopen = () => { opened = true; clearTimeout(slow); retryN = 0; lastRx = Date.now(); res(); };
     s.onmessage = e => onRaw(e.data);
     s.onclose = () => {
       clearTimeout(slow);
@@ -146,17 +146,29 @@ async function reconnect() {
   try {
     await connect();
     pendingKeys = { auth: me.auth, wrapRaw: me.wrapRaw };
-    send({ t: 'login', u: me.u, auth: me.auth });
+    send({ t: 'login', u: me.u, auth: me.auth, v: 2 });
   } catch (e) { onDisconnect(); }
 }
 // Nach Ruhezustand / Netzwechsel sofort neu verbinden statt auf den Zeitplan zu warten
 window.addEventListener('online', () => { if (me && !wsReady()) { clearTimeout(retryT); reconnect(); } });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && me && !wsReady()) { clearTimeout(retryT); reconnect(); } });
+let lastRx = Date.now();
+setInterval(() => {
+  if (!wsReady() || !me) return;
+  if (Date.now() - lastRx > 55000) {   // seit fast einer Minute nichts gehört → Verbindung hängt
+    const s0 = ws; ws = null; s0.onclose = null; try { s0.close(); } catch (e) {}
+    while (waiters.length) waiters.shift().rej(new Error('Verbindung zum Server getrennt.'));
+    onDisconnect(); return;
+  }
+  send({ t: 'ping' });
+}, 20000);
 // Nachrichten nacheinander verarbeiten (Entschlüsseln ist asynchron, die Reihenfolge muss stimmen)
 let chain = Promise.resolve();
 function onRaw(data) {
+  lastRx = Date.now();
   let m; try { m = JSON.parse(data); } catch (e) { return; }
-  if (m.t === 'a') { onAudio(m); return; }   // Ton nicht hinter andere Nachrichten einreihen
+  if (m.t === 'a') { onAudio(m); return; }
+  if (m.t === 'pong') return;   // Ton nicht hinter andere Nachrichten einreihen
   chain = chain.then(() => handle(m)).catch(e => console.error(e));
 }
 async function handle(m) {
@@ -190,15 +202,17 @@ async function handle(m) {
       renderFriends(); if (sel === f.key) renderHead();
       return;
     }
+    case 'pushok': pushOn = !!m.on; lsSet('sparkchat.push', pushOn); if ($('sPush')) $('sPush').classList.toggle('on', pushOn); if (m.on) toast('📱 Push-Benachrichtigungen sind an.', true); return;
     case 'mystatus': if (me) { me.status = m.text || ''; renderMe(); } return;
     case 'req': toast('🤝 ' + m.u + ' möchte dein Freund sein', true); notify('Freundschaftsanfrage', m.u + ' möchte dein Freund sein.'); blip([523, 784], .09); return;
     case 'info': toast(m.msg, !!m.ok); return;
     case 'gnew': if (groups.has(m.id)) openChat('g:' + m.id); else openAfter = 'g:' + m.id; return;
     case 'msg': return onDM(m);
     case 'gmsg': return onGroupMsg(m);
-    case 'dlv': case 'queued': case 'nack': case 'gack': {
+    case 'dlv': case 'queued': case 'nack': case 'gack': case 'sent': {
       const e = findMsg(m.id); if (!e) return;
-      e.st = m.t === 'dlv' ? 'dlv' : m.t === 'queued' ? 'wait' : m.t === 'gack' ? 'sent' : 'fail';
+      if (e.st === 'dlv' && m.t !== 'dlv') return;   // „zugestellt“ nicht wieder überschreiben
+      e.st = m.t === 'dlv' ? 'dlv' : m.t === 'queued' ? 'wait' : (m.t === 'gack' || m.t === 'sent') ? 'sent' : 'fail';
       if (m.t === 'nack') toast(m.msg || 'Nachricht konnte nicht gesendet werden.');
       if (e.hidden && e.st !== 'fail' && e.st !== 'send') dropHidden(e);
       saveHist(e.ck); if (e.ck === sel) renderMsgs();
@@ -264,8 +278,8 @@ $('authForm').onsubmit = async e => {
       authMsg('Erstelle dein Schlüsselpaar …', true);
       const kp = await C.generateKey(ECDH, true, ['deriveBits']);
       const pub = b64(await C.exportKey('raw', kp.publicKey)), encPriv = await wrapPriv(kp.privateKey, keys.wrapRaw);
-      send({ t: 'register', u, salt, auth: keys.auth, pub, encPriv, agree: true });
-    } else send({ t: 'login', u, auth: keys.auth });
+      send({ t: 'register', u, salt, auth: keys.auth, pub, encPriv, agree: true, v: 2 });
+    } else send({ t: 'login', u, auth: keys.auth, v: 2 });
     await helloP;
     $('aPass').value = $('aPass2').value = '';
   } catch (err) {
@@ -278,7 +292,7 @@ async function onHello(m, keys) {
   const key = m.me.u.toLowerCase(), same = me && me.key === key;
   const priv = await unwrapPriv(m.me.encPriv, keys.wrapRaw);
   wantAv(m.me.u, m.me.av || 0);
-  me = { u: m.me.u, key, auth: keys.auth, wrapRaw: keys.wrapRaw, priv, pub: m.me.pub, salt: m.me.salt, invisible: !!m.me.invisible, created: m.me.created, encPrivRaw: m.me.encPriv, status: m.me.status || '' };
+  me = { u: m.me.u, key, auth: keys.auth, wrapRaw: keys.wrapRaw, priv, pub: m.me.pub, salt: m.me.salt, invisible: !!m.me.invisible, created: m.me.created, encPrivRaw: m.me.encPriv, status: m.me.status || '', vapid: m.me.vapid || '' };
   manualClose = false;
   if (!same) {
     shared.clear(); hist.clear(); friends.clear(); groups.clear(); sel = null;
@@ -293,6 +307,8 @@ async function onHello(m, keys) {
   conn('');
   renderMe();
   setTimeout(() => resendPending(), 400);
+  setTimeout(syncPush, 800);
+  const open = new URLSearchParams(location.search).get('c'); if (open && convExists(open)) openChat(open);
 }
 // Angemeldet bleiben: im SPARK-Launcher von Windows verschlüsselt, im Browser im Speicher dieses Geräts
 // (nur wenn gewünscht – sonst nur bis der Tab geschlossen wird)
@@ -311,6 +327,7 @@ function showApp() { $('auth').hidden = true; $('app').hidden = false; renderAll
 async function logout(msg, ok) {
   manualClose = true; clearTimeout(retryT);
   if (call) endCall(true);
+  await pushOff(true);
   send({ t: 'logout' });
   try { if (ws) ws.close(); } catch (e) {}
   ws = null; me = null; histKey = null; friends.clear(); groups.clear(); hist.clear(); shared.clear(); sel = null;
@@ -338,7 +355,7 @@ async function autoLogin() {
       await connectRetry();
       const helloP = waitFor('hello');
       pendingKeys = { auth: d.auth, wrapRaw: unhex(d.wrap) };
-      send({ t: 'login', u: d.u, auth: d.auth });
+      send({ t: 'login', u: d.u, auth: d.auth, v: 2 });
       await helloP;
       break;
     } catch (err) {
@@ -676,7 +693,11 @@ function resendPending(only) {
     for (const e of h.slice()) if (e.me && (e.st === 'send' || (e.st === 'wait' && !isG(ck))) && e.ts > cut && e.k !== 'sys') transmit(ck, e);
   }
 }
+// Empfangsbestätigung an den Server – erst dann gilt eine Nachricht als zugestellt
+let gotList = [], gotT = null;
+function ackGot(from, id) { gotList.push([from, id]); if (!gotT) gotT = setTimeout(() => { gotT = null; if (gotList.length && send({ t: 'got', items: gotList })) gotList = []; }, 250); }
 async function onDM(m) {
+  ackGot(m.from, m.id);
   const fk = String(m.from).toLowerCase(), f = friends.get(fk);
   if (!f || !me) return;
   let body;
@@ -685,6 +706,7 @@ async function onDM(m) {
   await receive(fk, fk, m.id, m.ts, body);
 }
 async function onGroupMsg(m) {
+  ackGot(m.from, m.id);
   const g = groups.get(m.g), fk = String(m.from).toLowerCase();
   if (!g || !me || isBlocked(fk)) return;
   const mem = g.members.find(x => x.key === fk);
@@ -1045,6 +1067,7 @@ function showSettings() {
     '<div class="row"><b>Hintergrund</b>' + seg('lkBg', [['grid', 'Raster'], ['dots', 'Punkte'], ['plain', 'Schlicht']], prefs.bg) + '</div></div>' +
     '<div class="grp"><span class="label">// Benachrichtigungen & Ton</span><div class="row"><div class="grow"><b>Benachrichtigungen</b><small>Bei neuen Nachrichten, wenn das Fenster im Hintergrund ist' + (SPARK ? ' – im SPARK-Launcher auch, wenn das Fenster geschlossen ist' : '') + '</small></div>' + sw('sNot', prefs.notify) + '</div>' +
     '<div class="row"><div class="grow"><b>Töne</b><small>Signalton bei Nachrichten und Anrufen</small></div>' + sw('sSnd', prefs.sound) + '</div>' +
+    (pushSupported() ? '<div class="row"><div class="grow"><b>📱 Push-Benachrichtigungen</b><small>Auch wenn die App zu ist: „Du hast eine neue Nachricht“ – ohne Absender oder Inhalt.' + (iosNeedsHome() ? ' <b>iPhone:</b> Zuerst über Teilen → „Zum Home-Bildschirm“ hinzufügen und von dort öffnen.' : '') + '</small></div>' + sw('sPush', pushOn) + '</div>' : '') +
     (canSink ? '<div class="row"><div class="grow"><b>Lautsprecher / Kopfhörer</b><small>Für Anrufe und Sprachnachrichten</small></div><select class="inp" id="sSink" style="width:220px;height:36px"><option value="">Standard</option></select></div>' : '') + '</div>' +
     '<div class="grp"><span class="label">// Gesperrte Nutzer</span>' + (blocked.length ? blocked.map(u => '<div class="row"><b>' + esc(u) + '</b><button class="sec" data-unblock="' + esc(u) + '" style="height:32px">Aufheben</button></div>').join('') : '<small class="hint">Du hast niemanden blockiert.</small>') + '</div>' +
     '<div class="grp"><span class="label">// Sicherheit</span>' +
@@ -1062,6 +1085,7 @@ function showSettings() {
   $('sInv').onclick = () => { send({ t: 'invisible', on: !me.invisible }); me.invisible = !me.invisible; $('sInv').classList.toggle('on', me.invisible); renderMe(); };
   $('sNot').onclick = () => { prefs.notify = !prefs.notify; savePrefs(); $('sNot').classList.toggle('on', prefs.notify); if (prefs.notify && window.Notification && Notification.permission === 'default') Notification.requestPermission(); };
   $('sSnd').onclick = () => { prefs.sound = !prefs.sound; savePrefs(); $('sSnd').classList.toggle('on', prefs.sound); };
+  if ($('sPush')) $('sPush').onclick = () => pushOn ? pushOff() : askPush();
   if (canSink) {
     navigator.mediaDevices.enumerateDevices().then(list => {
       const outs = list.filter(d => d.kind === 'audiooutput' && d.deviceId && d.deviceId !== 'default');
@@ -1121,6 +1145,52 @@ function showMyData(d) {
   const json = JSON.stringify(d, null, 2);
   openModal('<span class="label">// Auskunft nach Art. 15 DSGVO</span><h2>📄 MEINE <span>DATEN</span></h2><p class="hint">Das hat der Server über dich gespeichert. „pub“ ist dein öffentlicher Schlüssel, „encPriv“ dein privater Schlüssel – verschlüsselt mit deinem Passwort, der Server kann ihn nicht lesen. Deine Chatverläufe liegen nur auf deinen Geräten.</p><pre class="data">' + esc(json) + '</pre><div class="btnrow"><button class="sec" id="dlData">⬇ Als Datei speichern</button></div>', true);
   $('dlData').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' })); a.download = 'spark-chat-meine-daten.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); };
+}
+
+// ---------- Push-Benachrichtigungen (Handy/Browser): nur nach Zustimmung, jederzeit abschaltbar
+let pushOn = !!lsGet('sparkchat.push', false), swReg = null;
+const pushSupported = () => !SPARK && 'serviceWorker' in navigator && 'PushManager' in window && (location.protocol === 'https:' || location.hostname === 'localhost');
+const iosNeedsHome = () => /iPhone|iPad/.test(navigator.userAgent) && !navigator.standalone && !matchMedia('(display-mode: standalone)').matches;
+if (pushSupported()) navigator.serviceWorker.register('sw.js').then(r => { swReg = r; }).catch(() => {});
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.open && convExists(e.data.open)) openChat(e.data.open); });
+const b64u = s => { const p = '='.repeat((4 - s.length % 4) % 4); return unb64((s + p).replace(/-/g, '+').replace(/_/g, '/')); };
+function askPush() {
+  if (iosNeedsHome()) return toast('Auf dem iPhone: zuerst über Teilen → „Zum Home-Bildschirm“ hinzufügen und SPARK Chat von dort öffnen.');
+  openModal('<span class="label">// Einwilligung</span><h2>📱 PUSH-<span>BENACHRICHTIGUNGEN</span></h2>' +
+    '<p>Damit du auch bei geschlossener App erfährst, dass jemand geschrieben hat, speichert der Server eine <b>Push-Adresse</b> deines Browsers. Die Benachrichtigung wird über den Push-Dienst deines Browsers zugestellt – z. B. <b>Google</b> (Chrome/Android), <b>Apple</b> (iPhone/Safari), <b>Mozilla</b> (Firefox) oder <b>Microsoft</b> (Edge), auch in die USA.</p>' +
+    '<p>Sie enthält nur <b>„SPARK Chat – Du hast eine neue Nachricht“</b>: keinen Absender, keinen Inhalt, verschlüsselt. Der Push-Dienst erfährt nur, dass und wann eine Benachrichtigung an dein Gerät geht.</p>' +
+    '<p class="hint">Freiwillig – du kannst die Einwilligung jederzeit in den Einstellungen widerrufen (Schalter aus). Beim Abmelden wird Push für dieses Gerät automatisch abgeschaltet. Mehr in der <a href="#" data-link="privacy">Datenschutzerklärung</a>.</p>' +
+    '<label class="check"><input type="checkbox" id="pcOk"> <span>Ich bin einverstanden, dass SPARK Chat mir Push-Benachrichtigungen schickt.</span></label>' +
+    '<div class="btnrow"><button class="btn cy" id="pcGo">EINSCHALTEN</button><button class="sec" data-close>Abbrechen</button></div>');
+  $('pcGo').onclick = async () => { if (!$('pcOk').checked) return toast('Bitte setze zuerst das Häkchen.'); closeModal(); await pushEnable(); };
+}
+async function pushEnable() {
+  try {
+    if (!me || !me.vapid) return toast('Push ist gerade nicht verfügbar – bitte später nochmal.');
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') return toast('Benachrichtigungen sind im Browser blockiert. Erlaube sie in den Website-Einstellungen.');
+    const reg = swReg || await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (sub && sub.options && sub.options.applicationServerKey && b64(sub.options.applicationServerKey) !== b64(b64u(me.vapid))) { await sub.unsubscribe(); sub = null; }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(me.vapid) });
+    send({ t: 'pushsub', sub: sub.toJSON(), consent: true });
+  } catch (e) { toast('Push konnte nicht eingeschaltet werden: ' + e.message); }
+}
+async function pushOff(silent) {
+  try {
+    if (!pushSupported()) return;
+    const reg = swReg || await navigator.serviceWorker.getRegistration();
+    const sub = reg && await reg.pushManager.getSubscription();
+    if (sub) { send({ t: 'pushdel', endpoint: sub.endpoint }); await sub.unsubscribe(); }
+  } catch (e) {}
+  pushOn = false; lsSet('sparkchat.push', false);
+  if ($('sPush')) $('sPush').classList.remove('on');
+  if (!silent) toast('Push-Benachrichtigungen sind aus.', true);
+}
+// Nach dem Anmelden: Push-Abo dieses Geräts mit dem Server abgleichen (z. B. nach Konto-Wechsel)
+async function syncPush() {
+  if (!pushOn || !pushSupported() || Notification.permission !== 'granted') return;
+  try { const reg = swReg || await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); if (sub) send({ t: 'pushsub', sub: sub.toJSON(), consent: true }); else pushEnable(); } catch (e) {}
 }
 
 // ---------- BLACKOUT-Einladungen
