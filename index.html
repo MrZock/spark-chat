@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' file: blob:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob:; media-src 'self' blob:; connect-src wss://nachtwache.onrender.com ws://localhost:* ws://127.0.0.1:*; worker-src blob:">
+<title>SPARK Chat</title>
+<meta name="theme-color" content="#05060b">
+<meta name="description" content="SPARK Chat – Freunde, Gruppen, Chat und Sprachanrufe, Ende-zu-Ende-verschlüsselt.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="stylesheet" href="chat.css">
+</head>
+<body>
+<div class="scan"></div>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="logo" viewBox="0 0 32 32">
+    <path d="M5 4h22l3 3v14l-3 3H14l-7 6v-6H5l-3-3V7z" fill="none" stroke="var(--acc)" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="M18 7l-7 9h5l-2 7 7-9h-5z" fill="#ffc93c"/></symbol>
+</svg>
+
+<!-- Anmeldung / Registrierung -->
+<section class="auth" id="auth">
+  <div class="grid"></div>
+  <form class="card hud" id="authForm" autocomplete="on">
+    <div class="logo"><svg><use href="#logo"/></svg>SPARK <span>CHAT</span></div>
+    <h1 id="authTitle">Willkommen zurück</h1>
+    <div class="sub" id="authSub">Melde dich an, um mit deinen Freunden zu schreiben und zu telefonieren.</div>
+    <div class="tabs"><button type="button" id="tabLogin" class="on">ANMELDEN</button><button type="button" id="tabReg">REGISTRIEREN</button></div>
+    <label class="field"><span>Benutzername</span><input class="inp" id="aUser" autocomplete="username" maxlength="20" spellcheck="false" required></label>
+    <label class="field"><span>Passwort</span><input class="inp" id="aPass" type="password" autocomplete="current-password" maxlength="200" required></label>
+    <div id="regOnly" hidden>
+      <label class="field"><span>Passwort wiederholen</span><input class="inp" id="aPass2" type="password" autocomplete="new-password" maxlength="200"></label>
+      <div class="warnbox">🔒 Dein Passwort verlässt nie dieses Gerät – deshalb kann es <b>niemand zurücksetzen</b>, auch wir nicht. Merk es dir gut!</div>
+      <label class="check"><input type="checkbox" id="aAge"> <span>Ich bin mindestens <b>16 Jahre</b> alt.</span></label>
+      <label class="check"><input type="checkbox" id="aAgree"> <span>Ich akzeptiere die <a href="#" data-link="terms">Nutzungsbedingungen</a> und habe die <a href="#" data-link="privacy">Datenschutzerklärung</a> gelesen.</span></label>
+    </div>
+    <label class="check" id="stayRow"><input type="checkbox" id="aStay" checked> <span>Angemeldet bleiben <small class="hint" id="stayHint">(sicher gespeichert von Windows)</small></span></label>
+    <div class="msgline" id="authMsg"></div>
+    <button class="btn" id="authBtn" type="submit">ANMELDEN</button>
+    <div class="legal"><a href="#" data-link="terms">Nutzungsbedingungen</a>·<a href="#" data-link="privacy">Datenschutz</a>·<a href="#" data-link="contact">Kontakt</a></div>
+  </form>
+</section>
+
+<!-- Hauptansicht -->
+<div class="app" id="app" hidden>
+  <aside>
+    <div class="top"><div class="logo"><svg><use href="#logo"/></svg>SPARK <span>CHAT</span></div><button class="ico" id="gear" title="Einstellungen">⚙</button></div>
+    <div class="conn" id="conn" hidden>Verbinde …</div>
+    <form class="add" id="addForm"><input class="inp" id="addName" placeholder="Freund hinzufügen: Benutzername" maxlength="20" spellcheck="false"><button class="sec" type="submit" title="Freund hinzufügen">+</button></form>
+    <div class="side-scroll">
+      <div id="reqBox"></div>
+      <div class="label sect">Gruppen <button class="mini" id="newGroup" title="Neue Gruppe">＋ NEU</button></div>
+      <div id="groups"></div>
+      <div class="label sect">Freunde <b id="frCount"></b></div>
+      <div id="friends"></div>
+    </div>
+    <div class="me"><div class="avw"><div class="av" id="meAv"></div><div class="pd on" id="mePd"></div></div><button class="meta" id="meMeta" title="Status ändern"><div class="nm" id="meName"></div><div class="st" id="meSt">Online</div></button><button class="ico" id="gear2" title="Einstellungen">⚙</button></div>
+  </aside>
+  <main id="main">
+    <div class="welcome" id="welcome"><div><svg class="big"><use href="#logo"/></svg><h2>SPARK CHAT</h2><div>Wähle links einen Freund oder eine Gruppe aus – oder füge oben jemanden über seinen Benutzernamen hinzu.<br>Alle Nachrichten und Anrufe sind <b>Ende-zu-Ende-verschlüsselt</b>.</div></div></div>
+    <div id="chat" hidden>
+      <div class="head">
+        <button class="ico back" id="back" title="Zurück">←</button>
+        <div class="avw"><div class="av" id="cAv"></div><div class="pd" id="cPd"></div></div>
+        <button class="meta" id="cMeta"><div class="nm" id="cName"></div><div class="st" id="cSt"></div></button>
+        <button class="ico" id="cInvite" title="Zu BLACKOUT einladen">🎮</button>
+        <button class="ico" id="cCall" title="Sprachanruf">📞</button>
+        <button class="ico" id="cMore" title="Mehr">⋯</button>
+      </div>
+      <div class="keywarn" id="keyWarn" hidden></div>
+      <div class="msgs" id="msgs"></div>
+      <div class="typing" id="typing"></div>
+      <div class="replybar" id="replyBar" hidden><div id="replyTxt"></div><button class="ico" id="replyX" title="Abbrechen">✕</button></div>
+      <div class="recbar" id="recBar" hidden><span class="recdot"></span><span id="recTime">0:00</span><span class="hint">Sprachnachricht wird aufgenommen …</span><button class="sec danger" id="recCancel">✕ Verwerfen</button><button class="btn cy" id="recSend">SENDEN</button></div>
+      <form class="compose" id="compose">
+        <button class="ico" type="button" id="attach" title="Bild senden">📎</button>
+        <textarea class="inp" id="text" rows="1" maxlength="4000" placeholder="Nachricht schreiben …"></textarea>
+        <button class="ico" type="button" id="recBtn" title="Sprachnachricht">🎤</button>
+        <button class="btn cy" type="submit" id="sendBtn">SENDEN</button>
+      </form>
+    </div>
+  </main>
+</div>
+
+<!-- Anruf -->
+<div class="call" id="call" hidden>
+  <div class="label" id="callLbl">// Sprachanruf</div>
+  <div class="av" id="callAv"></div>
+  <div class="nm" id="callName"></div>
+  <div class="st" id="callSt"></div>
+  <div class="btnrow" id="callBtns"></div>
+</div>
+
+<div class="modal" id="modal"><div class="sheet hud" id="sheet"></div></div>
+<div class="menu" id="menu" hidden></div>
+<div class="toast" id="toast"></div>
+<script src="chat.js"></script>
+</body>
+</html>
