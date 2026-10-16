@@ -259,6 +259,14 @@ pre.data { max-height: 300px; overflow: auto; padding: 12px; font: 12px/1.5 var(
 .call .btn { height: 40px; padding: 0 16px; }
 .call .sec { height: 40px; }
 .ring .av { animation: ring 1s infinite; }
+.call .cmin { position: absolute; right: 8px; top: 8px; width: 32px; height: 30px; font-size: 14px; }
+.call #callHint { margin-top: 12px; font-size: 12px; line-height: 1.4; }
+/* eingeklappter Anruf: kleine Leiste, damit man nebenbei weiter chatten kann */
+.call.mini { top: auto; bottom: 88px; width: auto; max-width: calc(100% - 24px); padding: 8px 16px 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; text-align: left; }
+.call.mini > *:not(.nm):not(.st) { display: none !important; }
+.call.mini::before { content: "📞"; font-size: 16px; }
+.call.mini .nm { font-size: 14px; letter-spacing: 1px; }
+.call.mini .st { margin: 0; color: var(--ok); }
 @keyframes ring { 50% { filter: drop-shadow(0 0 18px var(--acc)); transform: scale(1.06); } }
 
 .toast { position: fixed; z-index: 70; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0; padding: 11px 18px; clip-path: var(--cut-s); transition: .2s; pointer-events: none; max-width: 86%;
@@ -275,6 +283,7 @@ pre.data { max-height: 300px; overflow: auto; padding: 12px; font: 12px/1.5 var(
   .back { display: grid !important; }
   .mw { max-width: 88%; }
   .call { left: 12px; right: 12px; width: auto; top: calc(12px + env(safe-area-inset-top)); }
+  .call.mini { left: auto; right: 10px; top: auto; bottom: calc(76px + env(safe-area-inset-bottom)); }
   .inp, textarea.inp { font-size: 16px; }   /* iPhone zoomt sonst beim Tippen */
   .compose { padding: 8px 8px calc(10px + env(safe-area-inset-bottom)); gap: 4px; }
   .compose .btn { width: 50px; padding: 0; font-size: 0; }

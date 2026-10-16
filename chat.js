@@ -7,7 +7,7 @@
 // Gruppe: Inhalt mit einem Zufallsschlüssel verschlüsselt, der für jedes Mitglied einzeln verpackt wird.
 'use strict';
 (() => {
-const VERSION = 'Alpha 1.1.2';
+const VERSION = 'Alpha 1.1.3';
 const $ = id => document.getElementById(id);
 const SITE = 'https://mrzock.github.io/spark/';
 const LINKS = { terms: SITE + 'nutzungsbedingungen.html', privacy: SITE + 'datenschutz.html#chat', contact: SITE + 'datenschutz.html#kontakt', site: 'https://mrzock.github.io/spark-chat-web/' };
@@ -16,6 +16,7 @@ const SPARK = window.SPARK || null;   // im SPARK-Launcher: Spiele starten, sich
 // Android-/iPhone-App (Capacitor): Benachrichtigungen über das Handy-System
 const CAP = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() ? window.Capacitor : null;
 const LN = CAP && CAP.Plugins && CAP.Plugins.LocalNotifications;
+const CALLSVC = CAP && CAP.Plugins && CAP.Plugins.CallService;   // Android: Vordergrund-Dienst, damit der Anruf im Hintergrund weiterläuft
 if (LN) LN.requestPermissions().catch(() => {});
 const SERVER = (() => {
   let s = ''; try { s = new URLSearchParams(location.search).get('server') || ''; } catch (e) {}
@@ -496,13 +497,24 @@ function editStatus() {
 
 // ---------- Chat-Ansicht
 function openChat(k) {
+  if (call && call.state === 'live' && call.fk !== k && !callMini) { callMini = true; callUi(); }
   sel = k; unread[k] = 0; lsSet('sparkchat.unread.' + me.key, unread);
   cancelReply();
   $('app').classList.add('chatting');
   renderFriends(); renderChat();
   if (!matchMedia('(hover: none)').matches) setTimeout(() => $('text').focus(), 0);
 }
-$('back').onclick = () => { sel = null; $('app').classList.remove('chatting'); renderFriends(); renderChat(); };
+function goBack() { sel = null; $('app').classList.remove('chatting'); if (call && call.state === 'live' && !callMini) { callMini = true; callUi(); } renderFriends(); renderChat(); }
+$('back').onclick = goBack;
+// Handy: im Chat nach rechts wischen → zurück zur Kontaktliste
+(() => {
+  let sx = 0, sy = 0, st = 0;
+  $('chat').addEventListener('touchstart', e => { const t = e.touches[0]; sx = t.clientX; sy = t.clientY; st = Date.now(); }, { passive: true });
+  $('chat').addEventListener('touchend', e => {
+    const t = e.changedTouches[0], dx = t.clientX - sx, dy = Math.abs(t.clientY - sy);
+    if (innerWidth <= 720 && dx > 80 && dy < 60 && Date.now() - st < 700 && sx < innerWidth * 0.7) goBack();
+  }, { passive: true });
+})();
 function renderChat() {
   const ok = sel && convExists(sel);
   $('welcome').hidden = !!ok; $('chat').hidden = !ok;
@@ -1275,8 +1287,16 @@ function muEnc(x) {
   return ~(sign | (ex << 4) | ((s >> (ex + 3)) & 0x0f)) & 0xff;
 }
 const WORKLET = 'class Cap extends AudioWorkletProcessor{process(i,o){const c=i[0]&&i[0][0];if(c)this.port.postMessage(c.slice(0));return true}}registerProcessor("cap",Cap);';
+let callMini = false;
+$('callMin').onclick = e => { e.stopPropagation(); callMini = true; callUi(); };
+$('call').addEventListener('click', () => { if (callMini) { callMini = false; callUi(); } });
 function callUi() {
-  if (!call) { $('call').hidden = true; if (sel) renderHead(); return; }
+  if (!call) { $('call').hidden = true; callMini = false; if (sel) renderHead(); return; }
+  $('call').classList.toggle('mini', callMini && call.state !== 'end' && !(call.state === 'ring' && call.dir === 'in'));
+  $('callMin').hidden = call.state === 'end' || (call.state === 'ring' && call.dir === 'in');
+  const iosWeb = !CAP && /iPhone|iPad|iPod/.test(navigator.userAgent) && call.state === 'live';
+  $('callHint').hidden = !iosWeb;
+  if (iosWeb) $('callHint').textContent = '📱 iPhone: Bleib während des Anrufs in SPARK Chat – im Hintergrund pausiert Apple Ton und Mikrofon. Zum Schreiben den Anruf einklappen (▁).';
   const f = friends.get(call.fk), name = f ? display(f.key) : call.fk;
   $('call').hidden = false;
   $('call').classList.toggle('ring', call.state === 'ring');
@@ -1367,6 +1387,8 @@ async function startAudio() {
       const tr = c.stream.getAudioTracks()[0]; if (tr) tr.onended = () => { if (!document.hidden && call === c) restartMic(c); };
     }
     wakeOn(c); mediaSession(c);
+    keepAwakeAudio(c);
+    if (CALLSVC) CALLSVC.start({ who: display(c.fk) }).catch(() => {});
   } catch (e) { console.error(e); toast('Audio konnte nicht gestartet werden: ' + e.message); }
 }
 // Verbindung kurz weg (Handy im Hintergrund, Funkloch): Gespräch 40 s lang halten und beim Neuverbinden fortsetzen
@@ -1464,8 +1486,18 @@ let talkT = 0;
 function talk(id, who) { if (who) { talkT = Date.now(); $(id).classList.add('talk'); } else if (Date.now() - talkT > 250) $(id).classList.remove('talk'); }
 function audioCtx() { const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' }); ctx.resume && ctx.resume().catch(() => {}); return ctx; }
 async function callKey(fk, cid) { const f = friends.get(fk); const s = await sharedFor(fk, f && f.pub); return hkdfKey(s.bits, 'spark-chat/call/v1/' + cid, s.pair); }
+// Browser frieren stille Seiten im Hintergrund ein (Chrome/Android). Ein unhörbar leises Rauschen hält den Anruf aktiv.
+function keepAwakeAudio(c) {
+  try {
+    const len = c.ctx.sampleRate, buf = c.ctx.createBuffer(1, len, c.ctx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * 0.0004;
+    const src = c.ctx.createBufferSource(); src.buffer = buf; src.loop = true; src.connect(c.ctx.destination); src.start(); c.noise = src;
+  } catch (e) {}
+}
 function cleanupAudio(c) {
   clearTimeout(c.holdT);
+  try { if (c.noise) c.noise.stop(); } catch (e) {}
+  if (CALLSVC && c.state === 'live') CALLSVC.stop().catch(() => {});
   try { if (c.wake) c.wake.release(); } catch (e) {}
   try { if ('mediaSession' in navigator) navigator.mediaSession.metadata = null; } catch (e) {}
   try { if (c.stream) c.stream.getTracks().forEach(t => t.stop()); } catch (e) {}

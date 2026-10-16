@@ -5,10 +5,15 @@ const which = process.argv[2];
 if (which === 'android') {
   const mf = path.join(__dirname, 'android/app/src/main/AndroidManifest.xml');
   let s = fs.readFileSync(mf, 'utf8');
-  const perms = ['RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS', 'POST_NOTIFICATIONS', 'WAKE_LOCK'].filter(p => !s.includes('android.permission.' + p))
+  const perms = ['RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS', 'POST_NOTIFICATIONS', 'WAKE_LOCK', 'FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_MICROPHONE', 'FOREGROUND_SERVICE_MEDIA_PLAYBACK'].filter(p => !s.includes('android.permission.' + p + '"'))
     .map(p => '    <uses-permission android:name="android.permission.' + p + '" />').join('\n');
   s = s.replace('</manifest>', perms + '\n</manifest>');
+  // Vordergrund-Dienst für Anrufe im Hintergrund
+  if (!s.includes('.CallService')) s = s.replace('</application>', '        <service android:name=".CallService" android:exported="false" android:foregroundServiceType="microphone|mediaPlayback" />\n    </application>');
   fs.writeFileSync(mf, s);
+  // eigene Java-Klassen: Anruf-Dienst, Plugin, MainActivity (hält die WebView im Anruf aktiv)
+  const javaDir = path.join(__dirname, 'android/app/src/main/java/io/github/mrzock/sparkchat');
+  for (const f of fs.readdirSync(path.join(__dirname, 'native/android'))) fs.copyFileSync(path.join(__dirname, 'native/android', f), path.join(javaDir, f));
   const gr = path.join(__dirname, 'android/app/build.gradle');
   let g = fs.readFileSync(gr, 'utf8');
   g = g.replace(/versionCode \d+/, 'versionCode ' + build).replace(/versionName "[^"]*"/, 'versionName "' + ver + '"');
