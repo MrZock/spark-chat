@@ -1,0 +1,73 @@
+# Baut SPARK Chat als Android-App (APK) und iPhone-Test-App (unsignierte IPA) – kostenlos auf GitHub.
+# Start: neuen Tag „v1.2.3“ pushen (dann landen die Dateien im Release) oder von Hand unter „Actions“.
+name: Apps bauen
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Android-Projekt erzeugen
+        working-directory: app
+        run: |
+          npm install --no-audit --no-fund
+          node copy-web.js
+          npx cap add android
+          npx capacitor-assets generate --android --iconBackgroundColor '#05060b' --iconBackgroundColorDark '#05060b' --splashBackgroundColor '#05060b' --splashBackgroundColorDark '#05060b'
+          node patch-native.js android
+          npx cap sync android
+      - name: APK bauen
+        working-directory: app/android
+        run: ./gradlew assembleDebug --no-daemon
+      - run: cp app/android/app/build/outputs/apk/debug/app-debug.apk SPARK-Chat.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SPARK-Chat-Android
+          path: SPARK-Chat.apk
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: SPARK-Chat.apk
+  ios:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: iOS-Projekt erzeugen
+        working-directory: app
+        run: |
+          npm install --no-audit --no-fund
+          node copy-web.js
+          npx cap add ios
+          npx capacitor-assets generate --ios --iconBackgroundColor '#05060b' --splashBackgroundColor '#05060b'
+          node patch-native.js ios
+          npx cap sync ios
+      - name: IPA bauen (unsigniert – wird beim Installieren mit Sideloadly signiert)
+        working-directory: app/ios/App
+        run: |
+          xcodebuild -workspace App.xcworkspace -scheme App -configuration Release -sdk iphoneos -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -20
+          mkdir -p Payload && cp -R build/Build/Products/Release-iphoneos/App.app Payload/
+          zip -qr "$GITHUB_WORKSPACE/SPARK-Chat-iOS.ipa" Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SPARK-Chat-iOS
+          path: SPARK-Chat-iOS.ipa
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: SPARK-Chat-iOS.ipa

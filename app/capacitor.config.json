@@ -1,0 +1,8 @@
+{
+  "appId": "io.github.mrzock.sparkchat",
+  "appName": "SPARK Chat",
+  "webDir": "www",
+  "backgroundColor": "#05060b",
+  "android": { "allowMixedContent": false },
+  "ios": { "contentInset": "never", "limitsNavigationsToAppBoundDomains": false }
+}

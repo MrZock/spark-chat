@@ -7,12 +7,16 @@
 // Gruppe: Inhalt mit einem Zufallsschlüssel verschlüsselt, der für jedes Mitglied einzeln verpackt wird.
 'use strict';
 (() => {
-const VERSION = 'Alpha 1.1.1';
+const VERSION = 'Alpha 1.1.2';
 const $ = id => document.getElementById(id);
 const SITE = 'https://mrzock.github.io/spark/';
 const LINKS = { terms: SITE + 'nutzungsbedingungen.html', privacy: SITE + 'datenschutz.html#chat', contact: SITE + 'datenschutz.html#kontakt' };
 const GAME_WEB = 'https://mrzock.github.io/nachtwache/';
 const SPARK = window.SPARK || null;   // im SPARK-Launcher: Spiele starten, sicher angemeldet bleiben, Fenster zeigen
+// Android-/iPhone-App (Capacitor): Benachrichtigungen über das Handy-System
+const CAP = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() ? window.Capacitor : null;
+const LN = CAP && CAP.Plugins && CAP.Plugins.LocalNotifications;
+if (LN) LN.requestPermissions().catch(() => {});
 const SERVER = (() => {
   let s = ''; try { s = new URLSearchParams(location.search).get('server') || ''; } catch (e) {}
   if (!s) return 'wss://nachtwache.onrender.com/chat';
@@ -135,7 +139,8 @@ async function connectRetry() {
   }
 }
 function onDisconnect() {
-  if (call) endCall(false, 'Verbindung getrennt');
+  if (call && call.state === 'live') holdCall();
+  else if (call) endCall(false, 'Verbindung getrennt');
   if (!me || manualClose) return;
   conn('Verbindung getrennt – verbinde neu …');
   clearTimeout(retryT);
@@ -308,6 +313,7 @@ async function onHello(m, keys) {
   renderMe();
   setTimeout(() => resendPending(), 400);
   setTimeout(syncPush, 800);
+  if (call && call.state === 'live' && call.hold) { send({ t: 'call', op: 'resume', cid: call.cid }); call.hold = false; clearTimeout(call.holdT); callUi(); }
   const open = new URLSearchParams(location.search).get('c'); if (open && convExists(open)) openChat(open);
 }
 // Angemeldet bleiben: im SPARK-Launcher von Windows verschlüsselt, im Browser im Speicher dieses Geräts
@@ -323,7 +329,10 @@ function clearLogin(keepVault) {
   if (!keepVault && SPARK && SPARK.vault) SPARK.vault.del('chat');
   try { localStorage.removeItem('sparkchat.keep'); sessionStorage.removeItem('sparkchat.s'); } catch (e) {}
 }
-function showApp() { $('auth').hidden = true; $('app').hidden = false; renderAll(); updateActivity(); }
+function showApp() {
+  $('auth').hidden = true; $('app').hidden = false; renderAll(); updateActivity();
+  if (canInstall() && matchMedia('(hover: none)').matches && !lsGet('sparkchat.installHint', false)) { lsSet('sparkchat.installHint', true); setTimeout(installApp, 1500); }
+}
 async function logout(msg, ok) {
   manualClose = true; clearTimeout(retryT);
   if (call) endCall(true);
@@ -1067,6 +1076,7 @@ function showSettings() {
     '<div class="row"><b>Hintergrund</b>' + seg('lkBg', [['grid', 'Raster'], ['dots', 'Punkte'], ['plain', 'Schlicht']], prefs.bg) + '</div></div>' +
     '<div class="grp"><span class="label">// Benachrichtigungen & Ton</span><div class="row"><div class="grow"><b>Benachrichtigungen</b><small>Bei neuen Nachrichten, wenn das Fenster im Hintergrund ist' + (SPARK ? ' – im SPARK-Launcher auch, wenn das Fenster geschlossen ist' : '') + '</small></div>' + sw('sNot', prefs.notify) + '</div>' +
     '<div class="row"><div class="grow"><b>Töne</b><small>Signalton bei Nachrichten und Anrufen</small></div>' + sw('sSnd', prefs.sound) + '</div>' +
+    (canInstall() ? '<div class="row"><div class="grow"><b>📲 Als App installieren</b><small>Eigenes Symbol auf dem Home-Bildschirm, Vollbild wie eine richtige App – kostenlos.</small></div><button class="sec" id="sInstall" style="height:34px">Installieren</button></div>' : '') +
     (pushSupported() ? '<div class="row"><div class="grow"><b>📱 Push-Benachrichtigungen</b><small>Auch wenn die App zu ist: „Du hast eine neue Nachricht“ – ohne Absender oder Inhalt.' + (iosNeedsHome() ? ' <b>iPhone:</b> Zuerst über Teilen → „Zum Home-Bildschirm“ hinzufügen und von dort öffnen.' : '') + '</small></div>' + sw('sPush', pushOn) + '</div>' : '') +
     (canSink ? '<div class="row"><div class="grow"><b>Lautsprecher / Kopfhörer</b><small>Für Anrufe und Sprachnachrichten</small></div><select class="inp" id="sSink" style="width:220px;height:36px"><option value="">Standard</option></select></div>' : '') + '</div>' +
     '<div class="grp"><span class="label">// Gesperrte Nutzer</span>' + (blocked.length ? blocked.map(u => '<div class="row"><b>' + esc(u) + '</b><button class="sec" data-unblock="' + esc(u) + '" style="height:32px">Aufheben</button></div>').join('') : '<small class="hint">Du hast niemanden blockiert.</small>') + '</div>' +
@@ -1086,6 +1096,7 @@ function showSettings() {
   $('sNot').onclick = () => { prefs.notify = !prefs.notify; savePrefs(); $('sNot').classList.toggle('on', prefs.notify); if (prefs.notify && window.Notification && Notification.permission === 'default') Notification.requestPermission(); };
   $('sSnd').onclick = () => { prefs.sound = !prefs.sound; savePrefs(); $('sSnd').classList.toggle('on', prefs.sound); };
   if ($('sPush')) $('sPush').onclick = () => pushOn ? pushOff() : askPush();
+  if ($('sInstall')) $('sInstall').onclick = installApp;
   if (canSink) {
     navigator.mediaDevices.enumerateDevices().then(list => {
       const outs = list.filter(d => d.kind === 'audiooutput' && d.deviceId && d.deviceId !== 'default');
@@ -1147,9 +1158,23 @@ function showMyData(d) {
   $('dlData').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' })); a.download = 'spark-chat-meine-daten.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); };
 }
 
+// ---------- Als App installieren: Android/Chrome direkt, iPhone über „Zum Home-Bildschirm“
+let installEvt = null;
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; });
+const canInstall = () => !SPARK && !CAP && !standalone() && (installEvt || isIOS() || /Android/.test(navigator.userAgent));
+async function installApp() {
+  if (installEvt) { installEvt.prompt(); const r = await installEvt.userChoice.catch(() => null); installEvt = null; if (r && r.outcome === 'accepted') toast('📲 SPARK Chat wird installiert!', true); return; }
+  openModal('<span class="label">// Als App installieren</span><h2>📲 SPARK CHAT <span>AUFS HANDY</span></h2>' +
+    (isIOS() ? '<p><b>iPhone / iPad (Safari):</b></p><ol style="line-height:1.8"><li>Unten auf <b>Teilen</b> tippen (Quadrat mit Pfeil nach oben)</li><li><b>„Zum Home-Bildschirm“</b> wählen</li><li><b>Hinzufügen</b> tippen</li><li>SPARK Chat ab jetzt über das neue Symbol öffnen – dann läuft er wie eine App im Vollbild und kann Push-Benachrichtigungen bekommen.</li></ol><p class="hint">Funktioniert nur in Safari (ab iOS 16.4 mit Push).</p>'
+      : '<p><b>Android (Chrome):</b> Oben rechts auf <b>⋮</b> tippen → <b>„App installieren“</b> bzw. „Zum Startbildschirm hinzufügen“.</p>') +
+    '<p class="hint">Kostenlos, kein App Store nötig. Updates kommen automatisch.</p>');
+}
+
 // ---------- Push-Benachrichtigungen (Handy/Browser): nur nach Zustimmung, jederzeit abschaltbar
 let pushOn = !!lsGet('sparkchat.push', false), swReg = null;
-const pushSupported = () => !SPARK && 'serviceWorker' in navigator && 'PushManager' in window && (location.protocol === 'https:' || location.hostname === 'localhost');
+const pushSupported = () => !SPARK && !CAP && 'serviceWorker' in navigator && 'PushManager' in window && (location.protocol === 'https:' || location.hostname === 'localhost');
 const iosNeedsHome = () => /iPhone|iPad/.test(navigator.userAgent) && !navigator.standalone && !matchMedia('(display-mode: standalone)').matches;
 if (pushSupported()) navigator.serviceWorker.register('sw.js').then(r => { swReg = r; }).catch(() => {});
 if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.open && convExists(e.data.open)) openChat(e.data.open); });
@@ -1268,6 +1293,8 @@ function callStatus() {
   if (!call) return;
   const s = call.state === 'live' ? (() => { const t = Math.floor((Date.now() - call.t0) / 1000); return fmtDur(t) + (call.noMic ? ' · ohne Mikrofon' : ''); })()
     : call.state === 'ring' ? (call.dir === 'in' ? 'möchte mit dir sprechen' : 'klingelt …') : call.why || '';
+  if (call.state === 'live' && call.hold) return void ($('callSt').textContent = '⚠ Verbindung weg – verbinde neu …');
+  if (call.state === 'live' && call.peerHold) return void ($('callSt').textContent = '⚠ ' + display(call.fk) + ' hat kurz keine Verbindung …');
   $('callSt').textContent = s;
 }
 setInterval(callStatus, 1000);
@@ -1294,6 +1321,8 @@ function onCall(m) {
   }
   if (m.op === 'joined' && call && call.cid === m.old) { call.cid = m.cid; startAudio(); return; }   // beide haben gleichzeitig angerufen
   if (!call || call.cid !== m.cid) return;
+  if (m.op === 'hold') { call.peerHold = true; callUi(); return; }
+  if (m.op === 'resumed') { call.peerHold = false; call.next = 0; callUi(); return; }
   if (m.op === 'accept' && call.dir === 'out' && call.state === 'ring') { startAudio(); return; }
   if (m.op === 'end') endCall(false, m.why || 'Aufgelegt');
 }
@@ -1329,8 +1358,43 @@ async function startAudio() {
       mute.gain.value = 0; node.connect(mute); mute.connect(c.ctx.destination);
       node.port.onmessage = e => capture(c, e.data);
       src.connect(node); c.node = node;
+      const tr = c.stream.getAudioTracks()[0]; if (tr) tr.onended = () => { if (!document.hidden && call === c) restartMic(c); };
     }
+    wakeOn(c); mediaSession(c);
   } catch (e) { console.error(e); toast('Audio konnte nicht gestartet werden: ' + e.message); }
+}
+// Verbindung kurz weg (Handy im Hintergrund, Funkloch): Gespräch 40 s lang halten und beim Neuverbinden fortsetzen
+function holdCall() {
+  const c = call; if (!c || c.hold) return;
+  c.hold = true; callUi();
+  c.holdT = setTimeout(() => { if (call === c && c.hold) endCall(false, 'Verbindung verloren'); }, 40000);
+}
+// Bildschirm während des Anrufs anlassen (sonst schickt das Handy die App in den Ruhezustand)
+async function wakeOn(c) { try { if (navigator.wakeLock && !document.hidden) { c.wake = await navigator.wakeLock.request('screen'); } } catch (e) {} }
+function mediaSession(c) {
+  try {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.metadata = new MediaMetadata({ title: 'Anruf mit ' + display(c.fk), artist: 'SPARK Chat', artwork: [{ src: 'icon-512.png', sizes: '512x512', type: 'image/png' }] });
+    try { navigator.mediaSession.setActionHandler('hangup', () => endCall(true)); } catch (e) {}
+    try { navigator.mediaSession.setActionHandler('togglemicrophone', () => { c.muted = !c.muted; callUi(); }); } catch (e) {}
+  } catch (e) {}
+}
+// Zurück in die App: Ton fortsetzen, Mikrofon neu holen falls das Handy es abgeschaltet hat
+document.addEventListener('visibilitychange', async () => {
+  const c = call; if (!c || c.state !== 'live' || document.hidden) return;
+  try { if (c.ctx && c.ctx.state !== 'running') await c.ctx.resume(); } catch (e) {}
+  try { if (c.el) c.el.play().catch(() => {}); } catch (e) {}
+  if (!c.wake || c.wake.released) wakeOn(c);
+  const tr = c.stream && c.stream.getAudioTracks()[0];
+  if (c.stream && (!tr || tr.readyState === 'ended')) restartMic(c);
+});
+async function restartMic(c) {
+  try {
+    const st = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+    if (call !== c) { st.getTracks().forEach(t => t.stop()); return; }
+    try { c.stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+    c.stream = st; c.ctx.createMediaStreamSource(st).connect(c.node);
+  } catch (e) {}
 }
 function setVolume(c) { if (c && c.gain) c.gain.gain.value = c.loud ? 2.6 : 1; }
 async function routeOutput(c) {
@@ -1395,6 +1459,9 @@ function talk(id, who) { if (who) { talkT = Date.now(); $(id).classList.add('tal
 function audioCtx() { const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' }); ctx.resume && ctx.resume().catch(() => {}); return ctx; }
 async function callKey(fk, cid) { const f = friends.get(fk); const s = await sharedFor(fk, f && f.pub); return hkdfKey(s.bits, 'spark-chat/call/v1/' + cid, s.pair); }
 function cleanupAudio(c) {
+  clearTimeout(c.holdT);
+  try { if (c.wake) c.wake.release(); } catch (e) {}
+  try { if ('mediaSession' in navigator) navigator.mediaSession.metadata = null; } catch (e) {}
   try { if (c.stream) c.stream.getTracks().forEach(t => t.stop()); } catch (e) {}
   try { if (c.node) c.node.port.onmessage = null; } catch (e) {}
   try { if (c.pcs) c.pcs.forEach(p => p.close()); } catch (e) {}
@@ -1431,8 +1498,15 @@ function ringtone(on) {
   clearInterval(ringT); ringT = null;
   if (on) { const r = () => blip(call && call.dir === 'in' ? [784, 988, 784, 988] : [440, 440], .18, .07); r(); ringT = setInterval(r, 2200); }
 }
+let lnId = 1;
 function notify(title, body, ck) {
-  if (!prefs.notify || !window.Notification) return;
+  if (!prefs.notify) return;
+  if (LN) {   // App: Benachrichtigung über das Handy, solange die App im Hintergrund noch läuft
+    if (!document.hidden) return;
+    LN.schedule({ notifications: [{ id: lnId++, title, body: String(body).slice(0, 140), extra: { ck: ck || '' } }] }).catch(() => {});
+    return;
+  }
+  if (!window.Notification) return;
   if (document.hasFocus() && !document.hidden) return;
   try {
     if (Notification.permission === 'default') { Notification.requestPermission(); return; }
@@ -1446,7 +1520,8 @@ function toast(msg, ok) { const t = $('toast'); t.textContent = msg; t.className
 function conn(s) { $('conn').hidden = !s; $('conn').textContent = s || ''; }
 
 setMode(false);
-if (!(SPARK && SPARK.vault)) { $('aStay').checked = false; $('stayHint').textContent = '(nur auf deinem eigenen Gerät)'; }
+if (!(SPARK && SPARK.vault)) { $('aStay').checked = !!CAP; $('stayHint').textContent = CAP ? '(auf diesem Handy)' : '(nur auf deinem eigenen Gerät)'; }
+if (LN) LN.addListener('localNotificationActionPerformed', a => { const ck = a && a.notification && a.notification.extra && a.notification.extra.ck; if (ck && convExists(ck)) openChat(ck); });
 autoLogin();
 // Für Tests
 window.__chat = { get me() { return me; }, friends: () => friends, groups: () => groups, hist: () => hist, get call() { return call; }, send, SERVER };

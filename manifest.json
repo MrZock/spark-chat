@@ -1,12 +1,19 @@
 {
+  "id": "/spark-chat/",
   "name": "SPARK Chat",
   "short_name": "SPARK Chat",
-  "description": "Freunde, Chat und Sprachanrufe – Ende-zu-Ende-verschlüsselt",
+  "description": "Freunde, Gruppen, Chat und Sprachanrufe – Ende-zu-Ende-verschlüsselt",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#05060b",
   "theme_color": "#05060b",
   "lang": "de",
-  "icons": [{ "src": "icon.png", "sizes": "256x256", "type": "image/png", "purpose": "any" }]
+  "categories": ["social", "communication"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
 }
