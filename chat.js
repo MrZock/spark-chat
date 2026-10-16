@@ -156,7 +156,13 @@ async function reconnect() {
 }
 // Nach Ruhezustand / Netzwechsel sofort neu verbinden statt auf den Zeitplan zu warten
 window.addEventListener('online', () => { if (me && !wsReady()) { clearTimeout(retryT); reconnect(); } });
-document.addEventListener('visibilitychange', () => { if (!document.hidden && me && !wsReady()) { clearTimeout(retryT); reconnect(); } });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !me) return;
+  if (!wsReady()) { clearTimeout(retryT); reconnect(); return; }
+  // Zurück aus dem Hintergrund: lebt die Verbindung noch? Sonst nach 5 s neu verbinden (statt erst nach einer Minute)
+  const t0 = Date.now(); send({ t: 'ping' });
+  setTimeout(() => { if (me && wsReady() && lastRx < t0) { const s0 = ws; ws = null; s0.onclose = null; try { s0.close(); } catch (e) {} while (waiters.length) waiters.shift().rej(new Error('Verbindung zum Server getrennt.')); onDisconnect(); } }, 5000);
+});
 let lastRx = Date.now();
 setInterval(() => {
   if (!wsReady() || !me) return;
