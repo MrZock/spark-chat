@@ -10,7 +10,7 @@
 const VERSION = 'Alpha 1.1.2';
 const $ = id => document.getElementById(id);
 const SITE = 'https://mrzock.github.io/spark/';
-const LINKS = { terms: SITE + 'nutzungsbedingungen.html', privacy: SITE + 'datenschutz.html#chat', contact: SITE + 'datenschutz.html#kontakt' };
+const LINKS = { terms: SITE + 'nutzungsbedingungen.html', privacy: SITE + 'datenschutz.html#chat', contact: SITE + 'datenschutz.html#kontakt', site: 'https://mrzock.github.io/spark-chat-web/' };
 const GAME_WEB = 'https://mrzock.github.io/nachtwache/';
 const SPARK = window.SPARK || null;   // im SPARK-Launcher: Spiele starten, sicher angemeldet bleiben, Fenster zeigen
 // Android-/iPhone-App (Capacitor): Benachrichtigungen über das Handy-System
@@ -1088,7 +1088,7 @@ function showSettings() {
     '<div class="grp"><span class="label">// Deine Daten</span><div class="btnrow"><button class="sec" id="sData">📄 Meine Daten anzeigen</button><button class="sec" id="sClear">🗑 Verläufe auf diesem Gerät löschen</button></div>' +
     '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line2)"><b style="color:var(--bad)">Konto löschen</b><p class="hint" style="margin:4px 0 8px">Löscht dein Konto, deine Freundesliste und alle Daten auf dem Server sofort und endgültig.</p>' +
     '<div style="display:flex;gap:8px"><input class="inp" type="password" id="delPw" placeholder="Passwort zur Bestätigung" autocomplete="current-password"><button class="sec danger" id="sDel" style="flex:none;height:44px">Konto löschen</button></div><div class="msgline" id="delMsg"></div></div></div>' +
-    '<div class="grp"><span class="label">// Rechtliches</span><div class="btnrow"><a href="#" class="sec" style="display:inline-flex;align-items:center;text-decoration:none" data-link="terms">Nutzungsbedingungen</a><a href="#" class="sec" style="display:inline-flex;align-items:center;text-decoration:none" data-link="privacy">Datenschutz</a><a href="#" class="sec" style="display:inline-flex;align-items:center;text-decoration:none" data-link="contact">Kontakt</a></div>' +
+    '<div class="grp"><span class="label">// Rechtliches</span><div class="btnrow"><a href="#" class="sec" style="display:inline-flex;align-items:center;text-decoration:none" data-link="terms">Nutzungsbedingungen</a><a href="#" class="sec" style="display:inline-flex;align-items:center;text-decoration:none" data-link="privacy">Datenschutz</a><a href="#" class="sec" style="display:inline-flex;align-items:center;text-decoration:none" data-link="contact">Kontakt</a><a href="#" class="sec" style="display:inline-flex;align-items:center;text-decoration:none" data-link="site">🌐 Webseite & Apps</a></div>' +
     '<p class="hint" style="margin:10px 0 0">SPARK Chat ' + VERSION + ' · Ende-zu-Ende-verschlüsselt (ECDH P-256 + AES-256-GCM)</p></div>', true);
   const segBind = (id, key) => { for (const b of $(id).querySelectorAll('button')) b.onclick = () => { prefs[key] = b.dataset.v; savePrefs(); applyLook(); for (const o of $(id).querySelectorAll('button')) o.classList.toggle('on', o === b); renderAll(); }; };
   segBind('lkTheme', 'theme'); segBind('lkAcc', 'accent'); segBind('lkSize', 'size'); segBind('lkBub', 'bubble'); segBind('lkBg', 'bg');

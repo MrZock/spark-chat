@@ -40,6 +40,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: SPARK-Chat.apk
+          name: SPARK Chat ${{ github.ref_name }}
   ios:
     runs-on: macos-14
     steps:
@@ -71,3 +72,4 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: SPARK-Chat-iOS.ipa
+          name: SPARK Chat ${{ github.ref_name }}
